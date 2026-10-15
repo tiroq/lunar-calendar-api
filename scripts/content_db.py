@@ -1,10 +1,13 @@
-"""Apply the public PostgreSQL schema and activate a private JSON content snapshot.
+"""Versioned PostgreSQL content snapshot management (public code; private data external).
 
-No database records or third-party content are committed to the public repo.
 Usage:
   python scripts/content_db.py migrate
-  python scripts/content_db.py import --file /secure/private/content.json --activate
+  python scripts/content_db.py import --file /secure/content.json --activate
+  python scripts/content_db.py activate --version private-OLD_VERSION
   python scripts/content_db.py status
+
+Snapshots are immutable per content_version. New imports never unset an active
+version unless --activate is explicitly requested. Activation is transactional.
 """
 from __future__ import annotations
 
@@ -18,25 +21,44 @@ import sys
 from lunar_api.content_provider import validate_package
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / "migrations" / "001_create_content_packages.sql"
 
 
 def database():
     try:
         import psycopg
     except ImportError as exc:
-        raise RuntimeError("pip install -e '.[postgres]'") from exc
-    url = os.getenv("DATABASE_URL")
-    if not url:
+        raise RuntimeError("Install optional dependencies: pip install -e '.[postgres]'") from exc
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
         raise RuntimeError("DATABASE_URL is required")
-    return psycopg.connect(url, connect_timeout=10)
+    return psycopg.connect(dsn, connect_timeout=10)
 
 
 def migrate() -> None:
+    migrations = sorted((ROOT / "migrations").glob("[0-9][0-9][0-9]_*.sql"))
+    if not migrations:
+        raise RuntimeError("No SQL migrations found")
     with database() as conn:
         with conn.transaction():
-            conn.execute(MIGRATION.read_text(encoding="utf-8"))
-    print("Migration 001 applied")
+            for path in migrations:
+                conn.execute(path.read_text(encoding="utf-8"))
+    print(f"Applied migrations: {', '.join(path.name for path in migrations)}")
+
+
+def _activate(conn, version: str) -> None:
+    record = conn.execute(
+        "SELECT id FROM lunar_content_packages WHERE content_version = %s FOR UPDATE",
+        (version,),
+    ).fetchone()
+    if record is None:
+        raise ValueError(f"No snapshot exists for content_version={version!r}")
+    conn.execute(
+        "UPDATE lunar_content_packages SET activated_at = NULL WHERE activated_at IS NOT NULL"
+    )
+    conn.execute(
+        "UPDATE lunar_content_packages SET activated_at = now() WHERE id = %s",
+        (record[0],),
+    )
 
 
 def import_package(file: Path, activate: bool) -> None:
@@ -48,34 +70,44 @@ def import_package(file: Path, activate: bool) -> None:
         raise ValueError("content_version must be a nonempty string")
     with database() as conn:
         with conn.transaction():
-            import psycopg.types.json
-            conn.execute(
-                "INSERT INTO lunar_content_packages (content_version, sha256, payload) "
-                "VALUES (%s, %s, %s) "
-                "ON CONFLICT (content_version) DO UPDATE SET sha256=EXCLUDED.sha256, "
-                "payload=EXCLUDED.payload, imported_at=now(), activated_at=NULL",
-                (version, fingerprint, psycopg.types.json.Jsonb(payload)),
-            )
-            if activate:
-                conn.execute("UPDATE lunar_content_packages SET activated_at = NULL "
-                             "WHERE activated_at IS NOT NULL")
-                conn.execute(
-                    "UPDATE lunar_content_packages SET activated_at = now() "
-                    "WHERE content_version = %s", (version,)
+            current = conn.execute(
+                "SELECT sha256 FROM lunar_content_packages WHERE content_version = %s FOR UPDATE",
+                (version,),
+            ).fetchone()
+            if current is not None and current[0] != fingerprint:
+                raise ValueError(
+                    f"Immutable snapshot conflict: version {version!r} exists with different SHA-256"
                 )
-    print(f"Imported {version} (days={len(payload['days'])}, sha256={fingerprint}); active={activate}")
+            if current is None:
+                from psycopg.types.json import Jsonb
+                conn.execute(
+                    "INSERT INTO lunar_content_packages (content_version, sha256, payload) "
+                    "VALUES (%s, %s, %s)",
+                    (version, fingerprint, Jsonb(payload)),
+                )
+            if activate:
+                _activate(conn, version)
+    print(f"Imported/verified {version} (days={len(payload['days'])}, sha256={fingerprint}); activated={activate}")
+
+
+def activate_version(version: str) -> None:
+    with database() as conn:
+        with conn.transaction():
+            _activate(conn, version)
+    print(f"Activated existing snapshot: {version}")
 
 
 def status() -> None:
     with database() as conn:
-        rows = conn.execute(
+        records = conn.execute(
             "SELECT content_version, sha256, imported_at, activated_at "
             "FROM lunar_content_packages ORDER BY id DESC LIMIT 20"
         ).fetchall()
     print(json.dumps([{
-        "version": r[0], "sha256": r[1], "imported_at": r[2].isoformat(),
-        "activated_at": r[3].isoformat() if r[3] else None,
-    } for r in rows], ensure_ascii=False, indent=2))
+        "version": row[0], "sha256": row[1],
+        "imported_at": row[2].isoformat(),
+        "activated_at": row[3].isoformat() if row[3] else None,
+    } for row in records], ensure_ascii=False, indent=2))
 
 
 def main() -> None:
@@ -85,12 +117,16 @@ def main() -> None:
     command = sub.add_parser("import")
     command.add_argument("--file", required=True, type=Path)
     command.add_argument("--activate", action="store_true")
+    switch = sub.add_parser("activate", help="Activate an existing snapshot or roll back")
+    switch.add_argument("--version", required=True)
     sub.add_parser("status")
     args = parser.parse_args()
     if args.command == "migrate":
         migrate()
     elif args.command == "import":
         import_package(args.file, args.activate)
+    elif args.command == "activate":
+        activate_version(args.version)
     else:
         status()
 
