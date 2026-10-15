@@ -99,18 +99,39 @@ def package() -> dict | None:
     raise ContentConfigurationError(f"Unsupported content backend: {backend}")
 
 
+def _allow_third_party_prose(payload: dict | None) -> bool:
+    """Deliberately require both an operator opt-in and a rights declaration."""
+    return bool(
+        payload
+        and os.getenv("LUNAR_ENABLE_SOURCE_PROSE", "0") == "1"
+        and payload.get("rights", {}).get("third_party_prose_publication_allowed") is True
+    )
+
+
 def status() -> dict:
     backend = os.getenv("LUNAR_CONTENT_BACKEND", "none").strip().lower()
     payload = package()
+    days = payload["days"].values() if payload else ()
+    categories = [cat for day in days for cat in day.get("categories", {}).values()]
     return {
         "backend": backend,
         "connected": payload is not None,
         "schema_version": payload.get("schema_version") if payload else None,
         "content_version": payload.get("content_version") if payload else None,
         "days": len(payload["days"]) if payload else 0,
-        "category_records": sum(
-            len(day.get("categories", {})) for day in payload["days"].values()
+        "category_records": len(categories),
+        "source_rating_records": sum(
+            cat.get("provenance") == "life_moon_structured_rating" for cat in categories
+        ),
+        "historical_reference_links": sum(
+            len(day.get("historical_sources", ()))
+            for day in payload["days"].values()
         ) if payload else 0,
+        "historical_prose_enabled": _allow_third_party_prose(payload),
+        "historical_prose_records_published": sum(
+            len(day.get("historical_texts", ()))
+            for day in payload["days"].values()
+        ) if _allow_third_party_prose(payload) else 0,
     }
 
 
@@ -123,14 +144,23 @@ def day_content(day: int, style: str = "editorial") -> dict:
         return {"lunar_day": day, "available": False, "description": f"{day}-й лунный день",
                 "categories": {}, "alternatives": {}, "content_version": None}
     descriptions = record.get("descriptions", {})
+    allow_prose = _allow_third_party_prose(payload)
+    categories = {
+        slug: ({k: v for k, v in item.items() if k not in {"text", "license_reference"}}
+               if item.get("license_reference") and not allow_prose else item)
+        for slug, item in record.get("categories", {}).items()
+    }
+    editorial = descriptions.get(style, descriptions.get("editorial", f"{day}-й лунный день"))
+    if record.get("description_source") == "third_party_prose" and not allow_prose:
+        editorial = f"{day}-й лунный день"
     return {
         "lunar_day": day, "available": True,
-        "description": descriptions.get(style, descriptions.get("editorial", f"{day}-й лунный день")),
-        "categories": record.get("categories", {}),
+        "description": editorial,
+        "categories": categories,
         "alternatives": record.get("alternatives", {}),
         "symbols": record.get("symbols", []),
         "historical_sources": record.get("historical_sources", []),
-        "historical_texts": record.get("historical_texts", []),
+        "historical_texts": record.get("historical_texts", []) if allow_prose else [],
         "content_version": payload.get("content_version"),
         "provenance": payload.get("provenance", "private-content"),
     }
