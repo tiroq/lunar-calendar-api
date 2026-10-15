@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lunar}
+      POSTGRES_USER: ${POSTGRES_USER:-lunar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - lunar_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lunar} -d ${POSTGRES_DB:-lunar}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      LUNAR_CONTENT_BACKEND: postgres
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-lunar}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lunar}"
+      LUNAR_API_KEYS: "${LUNAR_API_KEYS:-}"
+      LUNAR_CORS_ORIGINS: "${LUNAR_CORS_ORIGINS:-}"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "python scripts/content_db.py migrate && exec uvicorn lunar_api.api:app --host 0.0.0.0 --port 8000"]
+
+volumes:
+  lunar_postgres:

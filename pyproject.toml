@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lunar-calendar-api"
+version = "0.2.0"
+description = "Location-aware lunar calendar HTTP API with optional private content plugin"
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.100", "uvicorn>=0.20", "pydantic>=2", "pyswisseph>=2.10"]
+
+[project.optional-dependencies]
+geo = ["timezonefinder>=6"]
+postgres = ["psycopg[binary]>=3.1"]
+test = ["pytest>=8", "httpx>=0.24"]
+
+[tool.setuptools.packages.find]
+include = ["lunar_api*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
