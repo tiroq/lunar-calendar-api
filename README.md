@@ -67,6 +67,13 @@ python scripts/content_db.py import --file /secure/moon-platform/content/v1/cont
 python scripts/content_db.py status
 ```
 
+For the built-in Docker Compose database (which is intentionally **not** exposed on the host), import from the public checkout with one command after `docker compose up -d --build`:
+
+```bash
+bash scripts/import_private_docker.sh /absolute/path/moon-platform/content/v1/content.json
+curl http://127.0.0.1:8000/v1/content/status
+```
+
 The importer validates the package, computes SHA-256, stores a new PostgreSQL JSONB snapshot and atomically activates it. Running API workers cache active data for at most 10 seconds. A private helper `moon-platform/scripts/deploy_lunar_content.sh` performs both steps. Avoid exposing the database to the public Internet.
 
 ## HTTP endpoints
