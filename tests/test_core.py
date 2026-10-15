@@ -77,3 +77,52 @@ def test_location_and_offsets(monkeypatch):
 def test_schema_fails_closed():
     with pytest.raises(ValueError):
         validate_package({"schema_version": 1, "days": {"5": {"categories": {"x": {"score": 20}}}}})
+
+
+def test_provenance_counts_and_rights_gated_prose(tmp_path, monkeypatch):
+    private_path = tmp_path / "private.json"
+    payload = {
+        "schema_version": 1, "content_version": "gate-fixture",
+        "rights": {"third_party_prose_publication_allowed": False},
+        "days": {"5": {
+            "description_source": "third_party_prose",
+            "descriptions": {"editorial": "NOT LICENSED SOURCE PROSE"},
+            "historical_texts": [{"source": "Example", "text": "NOT LICENSED AUTHOR TEXT"}],
+            "historical_sources": [{"source": "Example", "url": "https://example.org"}],
+            "categories": {"business": {
+                "score": 4, "provenance": "life_moon_structured_rating",
+                "license_reference": "third-party", "text": "NOT LICENSED CATEGORY TEXT",
+            }},
+        }},
+    }
+    private_path.write_text(json.dumps(payload))
+    monkeypatch.setenv("LUNAR_CONTENT_BACKEND", "file")
+    monkeypatch.setenv("LUNAR_CONTENT_FILE", str(private_path))
+    monkeypatch.setenv("LUNAR_ENABLE_SOURCE_PROSE", "1")
+    c = client.get("/v1/content/lunar-days/5").json()
+    assert c["historical_texts"] == []
+    assert c["description"] == "5-й лунный день"
+    assert "text" not in c["categories"]["business"]
+    stat = client.get("/v1/content/status").json()
+    assert stat["source_rating_records"] == 1
+    assert stat["historical_reference_links"] == 1
+    assert stat["historical_prose_enabled"] is False
+    assert stat["historical_prose_records_published"] == 0
+    payload["rights"]["third_party_prose_publication_allowed"] = True
+    private_path.write_text(json.dumps(payload) + " ")
+    c = client.get("/v1/content/lunar-days/5").json()
+    assert c["historical_texts"][0]["text"] == "NOT LICENSED AUTHOR TEXT"
+    assert c["description"] == "NOT LICENSED SOURCE PROSE"
+
+
+def test_only_operator_optin_is_not_rights_approval(tmp_path, monkeypatch):
+    private_path = tmp_path / "private.json"
+    private_path.write_text(json.dumps({
+        "schema_version": 1, "content_version": "test",
+        "rights": {"third_party_prose_publication_allowed": True},
+        "days": {"1": {"historical_texts": [{"text": "An example"}]}},
+    }))
+    monkeypatch.setenv("LUNAR_CONTENT_BACKEND", "file")
+    monkeypatch.setenv("LUNAR_CONTENT_FILE", str(private_path))
+    monkeypatch.delenv("LUNAR_ENABLE_SOURCE_PROSE", raising=False)
+    assert client.get("/v1/content/lunar-days/1").json()["historical_texts"] == []
