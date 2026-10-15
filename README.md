@@ -90,4 +90,4 @@ Uses `pyswisseph` Moshier ephemerides and local lunar rises (not a fixed Moscow 
 
 **License/rights:** review Swiss Ephemeris AGPL/professional licensing before commercial deployment. Third-party article reproduction requires suitable permission; a private Git repo alone does not grant redistribution rights.
 
-**History caveat:** old commits of this public Git repository still contain the earlier prototype's editorial code. The current branch has no such files, but deleting them from all public Git history requires separate repository/history rewriting.
+**History:** the public `main` branch was rebuilt as an orphan root, so it has no historical prototype commits in its ancestry. Previously published commit SHA URLs or caches may nevertheless remain temporarily accessible; only deleting/recreating the repository can provide stronger administrative separation.
