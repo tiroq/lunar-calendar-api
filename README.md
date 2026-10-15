@@ -74,7 +74,16 @@ bash scripts/import_private_docker.sh /absolute/path/moon-platform/content/v1/co
 curl http://127.0.0.1:8000/v1/content/status
 ```
 
-The importer validates the package, computes SHA-256, stores a new PostgreSQL JSONB snapshot and atomically activates it. Running API workers cache active data for at most 10 seconds. A private helper `moon-platform/scripts/deploy_lunar_content.sh` performs both steps. Avoid exposing the database to the public Internet.
+The importer validates the package, computes SHA-256 and stores an **immutable** PostgreSQL JSONB snapshot. Existing version IDs cannot be silently overwritten with different content; importing without `--activate` cannot unset an active snapshot. Activation is atomic and limited to one version at a time. Running API workers cache active data for at most 10 seconds. A private helper `moon-platform/scripts/deploy_lunar_content.sh` first validates all rating URLs and scores against the independent private inventory, then applies the SQL migrations and activates the snapshot. Avoid exposing the database to the public Internet.
+
+To roll back without changing any data files:
+
+```bash
+python scripts/content_db.py status
+python scripts/content_db.py activate --version private-OLD_VERSION
+```
+
+The `/v1/content/status` response includes counts for source-backed ratings and historical reference links; it does not publish historical author prose without *both* the `LUNAR_ENABLE_SOURCE_PROSE=1` operator opt-in and an explicit `rights.third_party_prose_publication_allowed=true` in the private content package.
 
 ## HTTP endpoints
 
