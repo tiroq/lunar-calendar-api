@@ -1,0 +1,37 @@
+# Infrastructure definition only. Blueprint sync provisions paid Render resources.
+# Create/sync manually only after reviewing the monthly charges.
+# Private lunar editorial content is NOT embedded in this public repository.
+services:
+  - type: web
+    name: lunar-calendar-api
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    autoDeployTrigger: off
+    healthCheckPath: /healthz
+    dockerCommand: sh scripts/start-production.sh
+    envVars:
+      - key: LUNAR_CONTENT_BACKEND
+        value: postgres
+      - key: LUNAR_ENABLE_SOURCE_PROSE
+        value: "0"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lunar-calendar-db
+          property: connectionString
+      # Required for authenticated API access; configure the same value in
+      # the bot's Cloudflare secret and GitHub production preflight secret.
+      - key: LUNAR_API_KEYS
+        sync: false
+
+databases:
+  - name: lunar-calendar-db
+    region: singapore
+    plan: 0.1c-256mb
+    postgresMajorVersion: "16"
+    databaseName: lunar
+    user: lunar
+    # Deny external DB connections by default. To import content from the
+    # trusted private GitHub runner, explicitly allowlist its egress /32,
+    # then remove that temporary rule once the import has succeeded.
+    ipAllowList: []
