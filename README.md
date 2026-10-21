@@ -47,6 +47,16 @@ An updated JSON file is reloaded when its size/mtime changes. Do not commit the 
 `historical_sources` and permission-cleared `historical_texts`.
 Optional `phases` and `zodiac` objects supply extra content endpoints.
 
+## Production release
+
+Infrastructure as code: [`render.yaml`](render.yaml) (Render Docker web service and PostgreSQL, paid plans, no automatic deploy).
+Runbook: [`docs/PRODUCTION_DEPLOYMENT.md`](docs/PRODUCTION_DEPLOYMENT.md).
+Read-only readiness probe: `python scripts/verify_prod_api.py`.
+
+The public repository **does not** ship the private content package. Production setup must include
+the separate, gated import from `tiroq/moon-platform` before the Telegram Bot is released.
+A green `/healthz` without 30 days/720 category ratings is **not** release-ready.
+
 ## PostgreSQL deployment and migrations
 
 ```bash
