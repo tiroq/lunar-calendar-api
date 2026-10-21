@@ -119,7 +119,12 @@ def local_lunar_boundaries(new_jd: float, next_new_jd: float,
         if nxt is None or nxt >= next_new_jd - 1e-8:
             break
         if nxt - cursor < 1e-5:
-            break
+            # A rise can coincide with the new moon to sub-second accuracy.
+            # Do not count it as an extra lunar day, but do NOT terminate the
+            # entire lunation: tomorrow's rises remain perfectly observable.
+            # Move the search cursor past this near-duplicate event.
+            cursor = nxt + 0.00002
+            continue
         result.append(nxt)
         cursor = nxt + 0.00001
     return result
